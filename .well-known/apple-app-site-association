@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.dk.ballenhavn.havneapp"],
+        "components": [
+          { "/": "/h/*", "comment": "Havnevalg via QR-kode" }
+        ]
+      }
+    ]
+  }
+}
