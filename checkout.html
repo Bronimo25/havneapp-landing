@@ -189,6 +189,7 @@
 
       paypal
         .Buttons({
+          style: { height: 45 },
           createOrder: async () => {
             const data = await createOrder();
             return data.orderId;
@@ -244,6 +245,7 @@
           const button = paymentsClient.createButton({
             buttonColor: 'white',
             buttonType: 'pay',
+            buttonSizeMode: 'fill',
             onClick: async () => {
               try {
                 const orderData = await createOrder();
@@ -278,6 +280,8 @@
               }
             },
           });
+          button.style.width = '100%';
+          button.style.height = '45px';
           walletsEl.appendChild(button);
         } catch (e) {
           // Google Pay er bare ikke eligibelt her — ingen fejlvisning.
