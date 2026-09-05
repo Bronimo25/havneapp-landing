@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Havneapp – Betaling</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #021D48;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .card { max-width: 420px; width: 100%; text-align: center; }
+    h1 { font-size: 1.2rem; margin: 16px 0 24px 0; font-weight: 600; }
+    p { opacity: 0.85; line-height: 1.5; font-size: 0.95rem; }
+    #buttons { margin-top: 16px; min-height: 45px; }
+    .spinner {
+      width: 32px; height: 32px; margin: 40px auto;
+      border: 3px solid rgba(255,255,255,0.25);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .hidden { display: none !important; }
+    .error { color: #ffb4b4; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 id="heading">Vælg betalingsmetode</h1>
+    <div id="loading" class="spinner"></div>
+    <div id="buttons" class="hidden"></div>
+    <p id="statusText" class="hidden"></p>
+  </div>
+
+  <script>
+    const STRINGS = {
+      da: {
+        heading: 'Vælg betalingsmetode',
+        loadFailed: 'Kunne ikke indlæse betalingsmuligheder. Prøv igen.',
+        processing: 'Bekræfter betaling …',
+        cancelled: 'Betalingen blev annulleret.',
+        failed: 'Betalingen kunne ikke gennemføres.',
+      },
+      en: {
+        heading: 'Choose a payment method',
+        loadFailed: 'Could not load payment options. Please try again.',
+        processing: 'Confirming payment …',
+        cancelled: 'Payment was cancelled.',
+        failed: 'Payment could not be completed.',
+      },
+      de: {
+        heading: 'Zahlungsmethode wählen',
+        loadFailed: 'Zahlungsoptionen konnten nicht geladen werden. Bitte versuche es erneut.',
+        processing: 'Zahlung wird bestätigt …',
+        cancelled: 'Die Zahlung wurde abgebrochen.',
+        failed: 'Die Zahlung konnte nicht abgeschlossen werden.',
+      },
+    };
+
+    const params = new URLSearchParams(window.location.search);
+    const orderGroupId = params.get('orderGroupId');
+    const harborId = params.get('harborId');
+    const locale = STRINGS[params.get('locale')] ? params.get('locale') : 'da';
+    const t = STRINGS[locale];
+
+    const SUPABASE_URL = 'https://aztvblebdwlufpgalwgp.supabase.co';
+    const ANON_KEY = 'sb_publishable_jWJfNGV5U-WOnob2pSbjow_BqM2SS7g';
+
+    const headingEl = document.getElementById('heading');
+    const loadingEl = document.getElementById('loading');
+    const buttonsEl = document.getElementById('buttons');
+    const statusEl = document.getElementById('statusText');
+
+    headingEl.textContent = t.heading;
+
+    function notifyFlutter(payload) {
+      const message = JSON.stringify(payload);
+      if (window.FlutterBridge && window.FlutterBridge.postMessage) {
+        window.FlutterBridge.postMessage(message);
+      } else {
+        // Til test direkte i en almindelig browser, uden appen.
+        console.log('FlutterBridge:', message);
+      }
+    }
+
+    function showError(text) {
+      loadingEl.classList.add('hidden');
+      buttonsEl.classList.add('hidden');
+      statusEl.textContent = text;
+      statusEl.classList.remove('hidden');
+      statusEl.classList.add('error');
+    }
+
+    function showStatus(text) {
+      buttonsEl.classList.add('hidden');
+      statusEl.classList.remove('error');
+      statusEl.textContent = text;
+      statusEl.classList.remove('hidden');
+    }
+
+    async function callFunction(name, body) {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+        method: 'POST',
+        headers: { apikey: ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Ukendt fejl');
+      return data;
+    }
+
+    async function init() {
+      if (!orderGroupId || !harborId) {
+        showError(t.loadFailed);
+        return;
+      }
+      try {
+        const configRes = await fetch(
+          `${SUPABASE_URL}/functions/v1/paypal-client-config?harborId=${encodeURIComponent(harborId)}`,
+          { headers: { apikey: ANON_KEY } },
+        );
+        const config = await configRes.json();
+        if (!configRes.ok || config.error) throw new Error(config.error || 'Ukendt fejl');
+
+        const script = document.createElement('script');
+        script.src =
+          `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(config.clientId)}` +
+          `&currency=DKK&intent=capture&components=buttons&enable-funding=googlepay,applepay`;
+        script.onload = renderButtons;
+        script.onerror = () => showError(t.loadFailed);
+        document.head.appendChild(script);
+      } catch (e) {
+        showError(t.loadFailed);
+      }
+    }
+
+    function renderButtons() {
+      loadingEl.classList.add('hidden');
+      buttonsEl.classList.remove('hidden');
+
+      paypal
+        .Buttons({
+          createOrder: async () => {
+            const data = await callFunction('paypal-create-order', { orderGroupId });
+            return data.orderId;
+          },
+          onApprove: async (data) => {
+            showStatus(t.processing);
+            try {
+              const result = await callFunction('paypal-capture-order', {
+                orderId: data.orderID,
+                orderGroupId,
+              });
+              if (result.status === 'COMPLETED') {
+                notifyFlutter({ status: 'success', orderId: data.orderID });
+              } else {
+                showError(t.failed);
+                notifyFlutter({ status: 'error', message: t.failed });
+              }
+            } catch (e) {
+              showError(t.failed);
+              notifyFlutter({ status: 'error', message: String(e) });
+            }
+          },
+          onCancel: () => {
+            notifyFlutter({ status: 'cancelled' });
+          },
+          onError: (err) => {
+            showError(t.failed);
+            notifyFlutter({ status: 'error', message: String(err) });
+          },
+        })
+        .render('#buttons');
+    }
+
+    init();
+  </script>
+</body>
+</html>
