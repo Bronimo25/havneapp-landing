@@ -20,7 +20,9 @@
     .card { max-width: 420px; width: 100%; text-align: center; }
     h1 { font-size: 1.2rem; margin: 16px 0 24px 0; font-weight: 600; }
     p { opacity: 0.85; line-height: 1.5; font-size: 0.95rem; }
-    #buttons { margin-top: 16px; min-height: 45px; }
+    #wallets { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+    #wallets:empty { margin-bottom: 0; }
+    #buttons { margin-top: 6px; min-height: 45px; }
     .spinner {
       width: 32px; height: 32px; margin: 40px auto;
       border: 3px solid rgba(255,255,255,0.25);
@@ -37,6 +39,7 @@
   <div class="card">
     <h1 id="heading">Vælg betalingsmetode</h1>
     <div id="loading" class="spinner"></div>
+    <div id="wallets"></div>
     <div id="buttons" class="hidden"></div>
     <p id="statusText" class="hidden"></p>
   </div>
@@ -77,31 +80,34 @@
 
     const headingEl = document.getElementById('heading');
     const loadingEl = document.getElementById('loading');
+    const walletsEl = document.getElementById('wallets');
     const buttonsEl = document.getElementById('buttons');
     const statusEl = document.getElementById('statusText');
 
     headingEl.textContent = t.heading;
+
+    // Én oprettet PayPal-ordre genbruges på tværs af de tre betalingsveje
+    // (PayPal-knap, Google Pay, Apple Pay) — hver vej opretter sin egen
+    // ordre i det øjeblik brugeren klikker, så en påbegyndt men aldrig
+    // gennemført ordre ikke efterlader dobbelte rækker.
 
     function notifyFlutter(payload) {
       const message = JSON.stringify(payload);
       if (window.FlutterBridge && window.FlutterBridge.postMessage) {
         window.FlutterBridge.postMessage(message);
       } else {
-        // Til test direkte i en almindelig browser, uden appen.
         console.log('FlutterBridge:', message);
       }
     }
 
     function showError(text) {
       loadingEl.classList.add('hidden');
-      buttonsEl.classList.add('hidden');
       statusEl.textContent = text;
       statusEl.classList.remove('hidden');
       statusEl.classList.add('error');
     }
 
     function showStatus(text) {
-      buttonsEl.classList.add('hidden');
       statusEl.classList.remove('error');
       statusEl.textContent = text;
       statusEl.classList.remove('hidden');
@@ -118,68 +124,241 @@
       return data;
     }
 
+    async function createOrder() {
+      return callFunction('paypal-create-order', { orderGroupId });
+    }
+
+    async function captureOrder(orderId) {
+      return callFunction('paypal-capture-order', { orderId, orderGroupId });
+    }
+
+    let paypalClientId = null;
+    let paypalEnv = 'sandbox';
+    // Google Pay/Apple Pay's egne biblioteker og PayPal's SDK indlæses
+    // parallelt i vilkårlig rækkefølge — et promise (i stedet for et
+    // fire-once event) sikrer at deres opsætning virker uanset hvilken
+    // der bliver klar først.
+    let resolveSdkReady;
+    const sdkReady = new Promise((resolve) => {
+      resolveSdkReady = resolve;
+    });
+
     async function init() {
       if (!orderGroupId || !harborId) {
-        showError(t.loadFailed + ' [params: og=' + orderGroupId + ' hid=' + harborId + ' qs=' + window.location.search + ']');
+        showError(t.loadFailed);
         return;
       }
       try {
-        const configRes = await fetch(
+        const config = await fetch(
           `${SUPABASE_URL}/functions/v1/paypal-client-config?harborId=${encodeURIComponent(harborId)}`,
           { headers: { apikey: ANON_KEY } },
-        );
-        const config = await configRes.json();
-        if (!configRes.ok || config.error) throw new Error(config.error || 'Ukendt fejl');
+        ).then((r) => r.json());
+        if (config.error) throw new Error(config.error);
+        paypalClientId = config.clientId;
+        paypalEnv = config.env;
 
         const script = document.createElement('script');
         script.src =
-          `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(config.clientId)}` +
-          `&currency=DKK&intent=capture&components=buttons&enable-funding=googlepay,applepay`;
-        script.onload = renderButtons;
-        script.onerror = (ev) => showError(t.loadFailed + ' [sdk script failed: ' + script.src + ']');
+          `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(paypalClientId)}` +
+          `&currency=DKK&intent=capture&components=buttons,googlepay,applepay`;
+        script.onload = onSdkLoaded;
+        script.onerror = () => showError(t.loadFailed);
         document.head.appendChild(script);
+
+        // Google Pay og Apple Pays egne JS-biblioteker indlæses parallelt —
+        // deres knapper vises kun hvis enheden/browseren rent faktisk
+        // understøtter dem.
+        loadScript('https://pay.google.com/gp/p/js/pay.js', setUpGooglePay);
+        loadScript('https://applepay.cdn-apple.com/jsapi/1.latest/apple-pay-sdk.js', setUpApplePay);
       } catch (e) {
-        showError(t.loadFailed + ' [' + e + ']');
+        showError(t.loadFailed);
       }
     }
 
-    function renderButtons() {
+    function loadScript(src, onload) {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = onload;
+      s.onerror = () => {}; // stille fejl — wallet'en vises bare ikke
+      document.head.appendChild(s);
+    }
+
+    function onSdkLoaded() {
       loadingEl.classList.add('hidden');
       buttonsEl.classList.remove('hidden');
 
       paypal
         .Buttons({
           createOrder: async () => {
-            const data = await callFunction('paypal-create-order', { orderGroupId });
+            const data = await createOrder();
             return data.orderId;
           },
           onApprove: async (data) => {
             showStatus(t.processing);
-            try {
-              const result = await callFunction('paypal-capture-order', {
-                orderId: data.orderID,
-                orderGroupId,
-              });
-              if (result.status === 'COMPLETED') {
-                notifyFlutter({ status: 'success', orderId: data.orderID });
-              } else {
-                showError(t.failed);
-                notifyFlutter({ status: 'error', message: t.failed });
-              }
-            } catch (e) {
-              showError(t.failed);
-              notifyFlutter({ status: 'error', message: String(e) });
-            }
+            await finish(data.orderID);
           },
-          onCancel: () => {
-            notifyFlutter({ status: 'cancelled' });
-          },
+          onCancel: () => notifyFlutter({ status: 'cancelled' }),
           onError: (err) => {
             showError(t.failed);
             notifyFlutter({ status: 'error', message: String(err) });
           },
         })
         .render('#buttons');
+
+      resolveSdkReady();
+    }
+
+    async function finish(orderId) {
+      try {
+        const result = await captureOrder(orderId);
+        if (result.status === 'COMPLETED') {
+          notifyFlutter({ status: 'success', orderId });
+        } else {
+          showError(t.failed);
+          notifyFlutter({ status: 'error', message: t.failed });
+        }
+      } catch (e) {
+        showError(t.failed);
+        notifyFlutter({ status: 'error', message: String(e) });
+      }
+    }
+
+    // ---------- Google Pay ----------
+
+    function setUpGooglePay() {
+      sdkReady.then(async () => {
+        if (!window.paypal || !paypal.Googlepay) return;
+        try {
+          const googlepayConfig = await paypal.Googlepay().config();
+          const paymentsClient = new google.payments.api.PaymentsClient({
+            environment: paypalEnv === 'live' ? 'PRODUCTION' : 'TEST',
+          });
+          const isReadyToPayRequest = {
+            apiVersion: 2,
+            apiVersionMinor: 0,
+            allowedPaymentMethods: googlepayConfig.allowedPaymentMethods,
+          };
+          const response = await paymentsClient.isReadyToPay(isReadyToPayRequest);
+          if (!response.result) return;
+
+          const button = paymentsClient.createButton({
+            buttonColor: 'white',
+            buttonType: 'pay',
+            onClick: async () => {
+              try {
+                const orderData = await createOrder();
+                const paymentDataRequest = {
+                  apiVersion: 2,
+                  apiVersionMinor: 0,
+                  allowedPaymentMethods: googlepayConfig.allowedPaymentMethods,
+                  merchantInfo: googlepayConfig.merchantInfo,
+                  transactionInfo: {
+                    currencyCode: orderData.currency,
+                    totalPriceStatus: 'FINAL',
+                    totalPrice: String(orderData.amount),
+                  },
+                };
+                const paymentData = await paymentsClient.loadPaymentData(paymentDataRequest);
+                showStatus(t.processing);
+                const confirmResult = await paypal.Googlepay().confirmOrder({
+                  orderId: orderData.orderId,
+                  paymentMethodData: paymentData.paymentMethodData,
+                });
+                if (confirmResult.status === 'APPROVED') {
+                  await finish(orderData.orderId);
+                } else {
+                  showError(t.failed);
+                  notifyFlutter({ status: 'error', message: t.failed });
+                }
+              } catch (e) {
+                // Brugeren lukkede bare Google Pay-arket — ikke en fejl.
+                if (e && e.statusCode === 'CANCELED') return;
+                showError(t.failed);
+                notifyFlutter({ status: 'error', message: String(e) });
+              }
+            },
+          });
+          walletsEl.appendChild(button);
+        } catch (e) {
+          // Google Pay er bare ikke eligibelt her — ingen fejlvisning.
+        }
+      });
+    }
+
+    // ---------- Apple Pay ----------
+
+    function setUpApplePay() {
+      sdkReady.then(async () => {
+        if (!window.paypal || !paypal.Applepay) return;
+        if (!window.ApplePaySession || !ApplePaySession.canMakePayments()) return;
+        try {
+          const applepay = paypal.Applepay();
+          const applepayConfig = await applepay.config();
+          if (!applepayConfig.isEligible) return;
+
+          const container = document.createElement('div');
+          container.innerHTML =
+            '<apple-pay-button id="btn-applepay" buttonstyle="black" type="buy" locale="' +
+            locale +
+            '" style="width:100%;height:45px;">';
+          walletsEl.appendChild(container);
+
+          document.getElementById('btn-applepay').addEventListener('click', async () => {
+            try {
+              const orderData = await createOrder();
+              const paymentRequest = {
+                countryCode: applepayConfig.countryCode,
+                merchantCapabilities: applepayConfig.merchantCapabilities,
+                supportedNetworks: applepayConfig.supportedNetworks,
+                currencyCode: orderData.currency,
+                total: {
+                  label: 'Havneapp',
+                  type: 'final',
+                  amount: String(orderData.amount),
+                },
+              };
+              const session = new ApplePaySession(4, paymentRequest);
+
+              session.onvalidatemerchant = (event) => {
+                applepay
+                  .validateMerchant({ validationUrl: event.validationURL })
+                  .then((result) => session.completeMerchantValidation(result.merchantSession))
+                  .catch(() => session.abort());
+              };
+
+              session.onpaymentauthorized = async (event) => {
+                try {
+                  const confirmResult = await applepay.confirmOrder({
+                    orderId: orderData.orderId,
+                    token: event.payment.token,
+                    billingContact: event.payment.billingContact,
+                  });
+                  if (confirmResult.status === 'APPROVED') {
+                    session.completePayment(ApplePaySession.STATUS_SUCCESS);
+                    showStatus(t.processing);
+                    await finish(orderData.orderId);
+                  } else {
+                    session.completePayment(ApplePaySession.STATUS_FAILURE);
+                    showError(t.failed);
+                    notifyFlutter({ status: 'error', message: t.failed });
+                  }
+                } catch (e) {
+                  session.completePayment(ApplePaySession.STATUS_FAILURE);
+                  showError(t.failed);
+                  notifyFlutter({ status: 'error', message: String(e) });
+                }
+              };
+
+              session.begin();
+            } catch (e) {
+              showError(t.failed);
+              notifyFlutter({ status: 'error', message: String(e) });
+            }
+          });
+        } catch (e) {
+          // Apple Pay er bare ikke eligibelt her — ingen fejlvisning.
+        }
+      });
     }
 
     init();
