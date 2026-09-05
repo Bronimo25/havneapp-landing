@@ -136,10 +136,10 @@
           `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(config.clientId)}` +
           `&currency=DKK&intent=capture&components=buttons&enable-funding=googlepay,applepay`;
         script.onload = renderButtons;
-        script.onerror = () => showError(t.loadFailed);
+        script.onerror = (ev) => showError(t.loadFailed + ' [sdk script failed: ' + script.src + ']');
         document.head.appendChild(script);
       } catch (e) {
-        showError(t.loadFailed);
+        showError(t.loadFailed + ' [' + e + ']');
       }
     }
 
