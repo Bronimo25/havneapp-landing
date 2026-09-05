@@ -22,6 +22,18 @@
     p { opacity: 0.85; line-height: 1.5; font-size: 0.95rem; }
     #wallets { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
     #wallets:empty { margin-bottom: 0; }
+    /* apple-pay-button er et custom element der ignorerer almindelig
+       inline width/height — størrelse styres via Apples egne
+       CSS-variabler i stedet. */
+    apple-pay-button {
+      display: block;
+      width: 100%;
+      --apple-pay-button-width: 100%;
+      --apple-pay-button-height: 45px;
+      --apple-pay-button-border-radius: 4px;
+      --apple-pay-button-padding: 0px;
+      --apple-pay-button-box-sizing: border-box;
+    }
     #buttons { margin-top: 6px; min-height: 45px; }
     .spinner {
       width: 32px; height: 32px; margin: 40px auto;
@@ -301,10 +313,10 @@
           if (!applepayConfig.isEligible) return;
 
           const container = document.createElement('div');
+          // "pay" + locale "en" giver "Pay with  Pay" — matcher at
+          // Google Pay-knappen heller ikke oversættes til sidens sprog.
           container.innerHTML =
-            '<apple-pay-button id="btn-applepay" buttonstyle="black" type="buy" locale="' +
-            locale +
-            '" style="width:100%;height:45px;">';
+            '<apple-pay-button id="btn-applepay" buttonstyle="black" type="pay" locale="en">';
           walletsEl.appendChild(container);
 
           document.getElementById('btn-applepay').addEventListener('click', async () => {
