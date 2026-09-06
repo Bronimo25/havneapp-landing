@@ -1,11 +1,11 @@
 {
-    "name": "Havneapp Preview",
-    "short_name": "Havneapp Preview",
+    "name": "Havneapp Admin",
+    "short_name": "Havneapp Admin",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#021D48",
     "theme_color": "#021D48",
-    "description": "Havneapp – preview af gæsteoplevelsen",
+    "description": "Havneapp admin-panel",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
