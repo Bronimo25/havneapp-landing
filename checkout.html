@@ -84,6 +84,7 @@
     const params = new URLSearchParams(window.location.search);
     const orderGroupId = params.get('orderGroupId');
     const harborId = params.get('harborId');
+    const returnUrl = params.get('returnUrl');
     const locale = STRINGS[params.get('locale')] ? params.get('locale') : 'da';
     const t = STRINGS[locale];
 
@@ -107,9 +108,20 @@
       const message = JSON.stringify(payload);
       if (window.FlutterBridge && window.FlutterBridge.postMessage) {
         window.FlutterBridge.postMessage(message);
-      } else {
-        console.log('FlutterBridge:', message);
+        return;
       }
+      // Ingen native WebView (ren browserfane, fx Flutter Web) — send
+      // brugeren tilbage til returnUrl med resultatet i query-strengen, i
+      // stedet for bare at logge det (ingen har mulighed for at læse en
+      // console.log her).
+      if (returnUrl) {
+        const url = new URL(returnUrl);
+        url.searchParams.set('checkout', payload.status);
+        if (payload.message) url.searchParams.set('msg', payload.message);
+        window.location.href = url.toString();
+        return;
+      }
+      console.log('FlutterBridge:', message);
     }
 
     function showError(text) {
