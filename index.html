@@ -3,45 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Findes kun til Ballen Havn — ingen grund til et mellemtrin hvor man
+       "vælger havn", så roden sender direkte videre til bookingsiden. -->
+  <meta http-equiv="refresh" content="0; url=/book/" />
   <title>Havneapp</title>
-  <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #021D48;
-      color: #ffffff;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      text-align: center;
-      padding: 24px;
-      box-sizing: border-box;
-    }
-    .card { max-width: 360px; }
-    .logo { width: min(440px, 65vw); height: auto; margin-bottom: 16px; }
-    h1 { font-size: 1.5rem; margin-bottom: 8px; }
-    p { opacity: 0.85; line-height: 1.5; margin-bottom: 32px; }
-    .stores { display: flex; flex-direction: column; gap: 12px; }
-    .stores a {
-      display: inline-block;
-      padding: 14px 20px;
-      border-radius: 12px;
-      background: #ffffff;
-      color: #021D48;
-      text-decoration: none;
-      font-weight: 600;
-    }
-  </style>
+  <script>location.replace('/book/');</script>
 </head>
 <body>
-  <div class="card">
-    <img class="logo" src="logo.png" alt="Havneapp" />
-    <h1>Havneapp</h1>
-    <p>Betal for din gæsteplads nemt fra din telefon. Scan QR-koden ved din havn, eller vælg havn herunder.</p>
-    <div class="stores">
-      <a href="/book/">Find din havn</a>
-    </div>
-  </div>
+  <p><a href="/book/">Fortsæt til Ballen Havn</a></p>
 </body>
 </html>
